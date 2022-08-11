@@ -1,16 +1,170 @@
-# This is a sample Python script.
+import hashlib
+import json
+from time import time
+from urllib.parse import urlparse
+from uuid import uuid4
 
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
+import requests
+from flask import Flask, jsonify, request
+
+class Blockchain(object):
+    def __init__(self):
+        self.chain=[];
+        self.current_transactions = [];
+
+        self.new_block(previous_hash='1', proof=100)
+
+    # def register_node(self, address):
+    #     parsed_url = urlparse(address)              #address: address of node
+    #     if parsed_url.netloc:                       #域名
+    #         self.nodes.add(parsed_url.netloc)
+    #     elif parsed_url.path:
+    #         self.nodes.add(parsed_url.path)
+    #     else:
+    #         raise ValueError('Invalid URL')
+    #
+    # def valid_chain(self, chain):
+    #     last_block = chain[0]
+    #     current_index = 1
+    #
+    #     while current_index < len(chain):
+    #         block = chain[current_index]
+    #         print(f'{last_block}')
+    #         print(f'{block}')
+    #         print("\n----------\n")
+    #
+    #         #Check the hash of the block
+    #         last_block_hash = self.hash(last_block)
+    #         if block['previous_hash'] != last_block_hash:
+    #             return False
+    #
+    #         #Check the PoW is correct
+    #         if not self.valid_proof(last_block['proof'], block['proof'], last_block_hash):
+    #             return False
+    #
+    #         last_block = block
+    #         current_index += 1
+    #
+    #     return True
+    #
+    # def resolve_conflicts(self):
+    #     neighbours = self.nodes
+    #     new_chain = None
+    #
+    #     max_length = len(self.chain)
+    #
+    #     for node in neighbours:
+    #         response = requests.get(f'http://{node}/chain')
+    #
+    #         if response.status_code == 200:
+    #             length = response.json()['length']
+    #             chain = response.json()['chain']
+    #
+    #             if length > max_length and self.valid_chain(chain):
+    #                 max_length = length
+    #                 new_chain = chain
+    #     if new_chain:
+    #         self.chain = new_chain
+    #         return True
+    #
+    #     return False
+
+    def new_block(self, proof, previous_hash=None):
+        #Creat a new block and add it to the chain
+        block = {
+            'index': len(self.chain) + 1,
+            'timestamp': time(),
+            'transactions': self.current_transactions,
+            'proof': proof,
+            'previous_hash': previous_hash or self.hash(self.chain[-1]),
+        }
+        self.current_transactions = []
+
+        self.chain.append(block)
+        return block
+
+    def new_transaction(self, sender, recipient, amount):
+        #Add a new transaction to the list
+        self.current_transactions.append({
+            'sender': sender,
+            'recipient': recipient,
+            'amount': amount,
+        })
+        return self.last_block['index'] + 1
+        #return the index of the Block that will hold this transaction
+
+    @staticmethod
+    def hash(block):
+        #Hashes a block
+        block_string = json.dumps(block, sort_keys=True).encode()
+        return hashlib.sha256(block_string).hexdigest()
+
+    @property
+    def last_block(self):
+        #Return the last block in the chain
+        return self.chain[-1]
 
 
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
+    #----------------- Now we are going to wonder how new blocks are created/forged/mined ------------------------#
+    def proof_of_work(self, last_proof):
+        proof = 0
+        while self.valid_proof(last_proof, proof) is False:
+            proof += 1
+        return proof
 
+    @staticmethod
+    def valid_proof(last_proof, proof):
+        guess = f'{last_proof}{proof}'.encode()
+        guess_hash = hashlib.sha256(guess).hexdigest()
+        return guess_hash[:4] == "0000"
 
-# Press the green button in the gutter to run the script.
+app = Flask(__name__)
+
+node_identifier = str(uuid4()).replace('-','')
+
+blockchain = Blockchain()
+
+@app.route('/mine', methods = ['GET'])
+def mine():
+    last_block = blockchain.last_block
+    last_proof = last_block['proof']
+    proof = blockchain.proof_of_work(last_proof)
+
+    blockchain.new_transaction(
+        sender="0",
+        recipient=node_identifier,
+        amount=1,
+    )
+    previous_hash = blockchain.hash(last_block)
+    block = blockchain.new_block(proof, previous_hash)
+
+    response = {
+        'message': "New Block Forged",
+        'index': block['index'],
+        'transactions': block['transactions'],
+        'proof': block['proof'],
+        'previous_hash': block['previous_hash']
+    }
+    return jsonify(response), 200
+
+@app.route('/transactions/new', methods = ['POST'])
+def new_transaction():
+    values = request.get_json()
+
+    required = ['sender', 'recipient', 'amount']
+    if not all(k in values for k in required):
+        return 'Missing values', 400
+    index = blockchain.new_transaction(values['sender'], values['recipient'], values['amount'])
+    response = {'message': f'Transaction will be added to Block{index}'}
+    return jsonify(response), 201
+
+@app.route('/chain', methods = ['GET'])
+def full_chain():
+    response = {
+        'chain': blockchain.chain,
+        'length':len(blockchain.chain),
+    }
+    return jsonify(response), 200
+
 if __name__ == '__main__':
-    print_hi('PyCharm')
-
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+    app.run(debug=True, host='0.0.0.0',port = 5000)
