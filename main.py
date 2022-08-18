@@ -1,5 +1,6 @@
 import hashlib
 import json
+import filehasher as fh
 from time import time
 from urllib.parse import urlparse
 from uuid import uuid4
